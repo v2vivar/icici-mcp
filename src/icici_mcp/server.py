@@ -87,7 +87,7 @@ def _past_iso(days: int = 30) -> str:
 
 @mcp.tool(annotations=WRITE)
 def icici_login() -> str:
-    """Authenticate with ICICI Direct. Auto-logs in with TOTP if available, or uses manual session token. Call this if other tools fail with auth errors."""
+    """Authenticate with ICICI Direct using a manually supplied or cached session token."""
     logger.info("Tool called: icici_login")
     creds = load_credentials()
     try:

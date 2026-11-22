@@ -21,13 +21,13 @@ Traditional Breeze Connect wrappers require you to write Python code to trade. W
 You:       "How's my portfolio doing?"
 Assistant: fetches holdings, calculates P&L, summarizes gainers and losers
 
-You:       "Show me the NIFTY option chain for next expiry"
-Assistant: fetches option chain data with strikes, premiums, and OI
+You:       "Show me a NIFTY futures quote"
+Assistant: fetches a quote for the specified contract
 ```
 
 No code. No scripts. No terminal. Just conversation.
 
-icici-mcp connects any MCP-compatible AI assistant to your ICICI Direct account with portfolio and market-data tools, automated TOTP login, and auto-retry on expired tokens.
+icici-mcp connects an assistant to your ICICI Direct account with portfolio and market-data tools and manual daily login.
 
 ## How it works
 
@@ -35,7 +35,7 @@ icici-mcp connects any MCP-compatible AI assistant to your ICICI Direct account 
 You (natural language) --> AI Assistant --> icici-mcp (MCP server) --> ICICI Direct Breeze API
 ```
 
-Your AI assistant can retrieve portfolio and market data through the MCP protocol. The server handles authentication automatically, including daily token refresh via TOTP.
+Your AI assistant can retrieve portfolio and market data through the MCP protocol. After manual login, the server reuses the cached token while it remains valid.
 
 ## Features
 
@@ -43,7 +43,7 @@ Your AI assistant can retrieve portfolio and market data through the MCP protoco
 
 | Tool | Description |
 |------|-------------|
-| `icici_login` | Auto-authenticate with TOTP |
+| `icici_login` | Authenticate using a cached or manually supplied session token |
 | `get_holdings` | Portfolio holdings with P&L |
 | `get_demat_holdings` | All shares in your demat account |
 | `get_positions` | Today's open positions |
@@ -52,7 +52,7 @@ Your AI assistant can retrieve portfolio and market data through the MCP protoco
 | `get_funds` | Available funds in your account |
 | `get_quote` | Live market quotes (equity and F&O) |
 | `get_historical_data` | Historical OHLCV candle data |
-| `get_option_chain` | Option chain quotes with strikes and premiums |
+| `get_option_chain` | Option chain quotes (see known limitation below) |
 
 Live trading tools are not exposed through MCP. They must not be re-enabled
 until server-side authorization, order-specific explicit approval, risk
@@ -62,10 +62,13 @@ Python order functions remain callable directly; this restriction applies to
 MCP exposure.
 
 **Key capabilities:**
-- Fully automated login -- TOTP generated on the fly, no manual intervention
-- Auto-retry on stale tokens -- re-authenticates transparently if a token expires mid-session
-- Option chain data for F&O analysis
+- Manual ICICI login with a shared daily session cache
 - Supports equity and F&O market data
+- Quotes are point-in-time snapshots, not a streaming feed
+
+The option-chain request tested for NIFTY was rejected by Breeze because it
+required a right or strike price; this tool does not currently expose either
+parameter. Individual option quotes and historical candles have worked.
 
 ## Compatible with
 
@@ -80,39 +83,81 @@ Works with any MCP-compatible client, including:
 | [Continue](https://continue.dev/) | VS Code, JetBrains |
 | Any MCP-compatible client | See [MCP clients list](https://modelcontextprotocol.io/clients) |
 
-## Quick Start
+## Docker and Open WebUI setup
 
-### 1. Install
+The Compose service runs mcpo and the stdio MCP server in one container.
+Docker, Docker Compose, and an existing external `docker-net-private` network
+are required. Open WebUI must also be connected to that network. If using a
+different network, update its name in `compose.yaml`.
+
+From the deployed checkout on the Linux host:
 
 ```bash
-pip install icici-mcp
-playwright install chromium
+cd /opt/trikon/icici-mcp  # or your checkout directory
+docker network inspect docker-net-private
+cp .env.example .env
+chmod 600 .env
+# Privately edit .env: set ICICI_API_KEY, ICICI_API_SECRET and MCPO_API_KEY.
+docker compose up -d --build
+docker compose ps
 ```
 
-> **Note:** The `playwright install chromium` step is required once for automated TOTP login. It downloads a headless Chromium browser (~90MB) used to log in to ICICI Direct automatically.
+Use a separate strong random value for `MCPO_API_KEY`; do not reuse an ICICI
+credential. Follow Docker Compose `.env` quoting rules for special characters.
+Do not set `ICICI_SESSION_TOKEN` in `.env` when using the interactive daily
+login. Keep `.env` private: it is excluded from Git and the Docker build.
+If the checkout is root-owned, use an authorized root shell (for example
+`sudo -i`) before running these commands.
 
-### 2. Get your credentials
+mcpo runs in single-server mode; **there is no separate mcpo JSON config
+file**. The Dockerfile starts it with strict authentication, port 8000, and
+`icici-mcp` as its stdio backend. The host port is bound to
+`127.0.0.1:8000`; the network alias is `icici-mcp`.
 
-You need an [ICICI Direct API](https://api.icicidirect.com/) app. From your app dashboard, note your **API Key** and **API Secret**.
+In Open WebUI, add an OpenAPI tool server at `http://icici-mcp:8000`, using
+`MCPO_API_KEY` for bearer authentication. The schema is at
+`http://icici-mcp:8000/openapi.json`; there is no `/icici` path prefix.
+The external Docker network is shared and the connection uses unencrypted
+HTTP. Limit which containers join it and do not expose the port publicly;
+remote access requires a separately secured, TLS-enabled deployment.
 
-You also need:
-- **User ID** -- your ICICI Direct client ID
-- **Password** -- your ICICI Direct login password
-- **TOTP Secret** (recommended) -- the base32 seed from setting up an external authenticator app for ICICI Direct 2FA. This enables fully automated login with no manual steps.
+### Daily manual ICICI login
 
-<details>
-<summary>How to get your TOTP secret</summary>
+The Breeze session is needed for read-only quotes and historical data as well
+as account operations. Before using the service on a new India calendar day,
+or whenever ICICI rejects the cached session:
 
-1. Log in to **secure.icicidirect.com**
-2. Go to **Profile** > **Security Settings** > **2FA / TOTP Settings**
-3. Choose to set up an **external authenticator app** (Google Authenticator, Authy, etc.)
-4. When the QR code appears, look for a **"Can't scan? Copy this key"** link or use a QR decoder to extract the secret
-5. That key is your TOTP secret -- save it before completing setup
-6. Enter the 6-digit code from your authenticator to finish
+```bash
+cd /opt/trikon/icici-mcp  # or your checkout directory
+docker compose up -d
+docker compose exec icici icici-mcp-login
+```
 
-</details>
+1. Open the official ICICI login URL displayed by the command in your own
+   browser and complete ICICI's login.
+2. Copy only the `apisession` value from the redirect URL and paste it into
+   the hidden terminal prompt. Do not share the token, redirect URL, API keys,
+   or credentials in chat.
+3. Wait for `Login successful. Session token cached for today.` The CLI
+   validates the token with Breeze before replacing the cache.
 
-### 3. Configure your MCP client
+The server reads the shared `icici-session` volume on subsequent requests;
+no restart or token copying into `.env` is needed. The cache is valid only for
+the current India calendar day, and ICICI may invalidate it earlier. ICICI
+describes session-key expiry as 24 hours or midnight
+([guidance](https://www.icicidirect.com/ilearn/stocks/articles/how-to-generate-session-key-and-install-sdk-for-breeze-api)).
+The volume contains a sensitive token; protect access to the Docker host and
+backups. No TOTP automation is used.
+
+For a read-only check, request a quote using an ICICI stock code, such as
+`ICIBAN`. A successful HTTP response alone is not enough: check the Breeze
+`Status` and `Error` in the response. If authentication fails, repeat the
+manual login; if Open WebUI cannot connect, check the container, shared
+network, URL, and bearer key. Avoid sharing logs containing credentials.
+
+## Local stdio setup
+
+Install this checkout with `pip install .` and configure your MCP client:
 
 Add this to your MCP client configuration. The config location depends on your client -- refer to your client's documentation for the exact path.
 
@@ -123,29 +168,28 @@ Add this to your MCP client configuration. The config location depends on your c
       "command": "icici-mcp",
       "env": {
         "ICICI_API_KEY": "your-api-key",
-        "ICICI_API_SECRET": "your-api-secret",
-        "ICICI_USER_ID": "your-user-id",
-        "ICICI_PASSWORD": "your-password",
-        "ICICI_TOTP_SECRET": "your-totp-secret",
-        "ICICI_SESSION_TOKEN": ""
+        "ICICI_API_SECRET": "your-api-secret"
       }
     }
   }
 }
 ```
 
-Restart your MCP client. You're ready to monitor your account.
+Run `icici-mcp-login` with the same API key and secret in its environment, then
+restart your MCP client. The CLI and server must run as the same user to share
+the cache.
 
-### 4. Try it out
+### Try it out
 
 Open a new chat and try:
 
 - "Show my portfolio holdings"
-- "What's Reliance trading at?"
+- "What's the ICIBAN quote?"
 - "How much cash do I have available?"
-- "Show me NIFTY option chain for the nearest expiry"
+- "Show me a quote for the specified NIFTY futures contract"
 
-The AI assistant understands stock names in plain English -- no need to use trading symbols.
+Breeze uses ICICI stock codes, which can differ from NSE symbols. Provide the
+contract expiry and, for options, the strike and call/put where required.
 
 ## Environment Variables
 
@@ -153,38 +197,18 @@ The AI assistant understands stock names in plain English -- no need to use trad
 |----------|----------|-------------|
 | `ICICI_API_KEY` | Yes | ICICI Direct API key |
 | `ICICI_API_SECRET` | Yes | ICICI Direct API secret |
-| `ICICI_USER_ID` | Yes | ICICI Direct client ID |
-| `ICICI_PASSWORD` | Yes | ICICI Direct login password |
-| `ICICI_TOTP_SECRET` | No | TOTP base32 seed for auto-login. Without this, you must run `icici-mcp-login` manually each day or set `ICICI_SESSION_TOKEN`. |
-| `ICICI_SESSION_TOKEN` | No | Manual session token from the ICICI Direct API login page. Use this if you cannot set up TOTP auto-login. |
+| `MCPO_API_KEY` | Container only | Separate key required to access the local mcpo HTTP API |
+| `ICICI_SESSION_TOKEN` | No | Manually obtained API session token; avoid setting this for the container's daily interactive login |
 
 ## Manual Login
 
-If you don't have a TOTP secret, you can log in manually each day:
-
-**Option 1: Use the CLI tool**
-
-```bash
-export ICICI_API_KEY=your-api-key
-export ICICI_API_SECRET=your-api-secret
-export ICICI_USER_ID=your-user-id
-export ICICI_PASSWORD=your-password
-icici-mcp-login
-```
-
-This caches the session token for the rest of the day. The MCP server will use the cached token until it expires.
-
-**Option 2: Set ICICI_SESSION_TOKEN directly**
-
-1. Visit `https://api.icicidirect.com/apiuser/login?api_key=YOUR_API_KEY`
-2. Complete the login flow manually
-3. Copy the `apisession` value from the redirect URL
-4. Set it as `ICICI_SESSION_TOKEN` in your MCP client config
+Use `icici-mcp-login` as described above. The CLI accepts the API session token
+returned by ICICI's official login; it never asks for your password or TOTP.
 
 ## Use Cases
 
 - **Daily portfolio monitoring** -- "Give me a summary of my portfolio with top gainers and losers"
-- **F&O research** -- "Show me BANKNIFTY option chain"
+- **F&O research** -- "Show me a quote for a specified NIFTY option"
 - **Research** -- "What's the 52-week high of HDFC Bank?"
 - **Scheduled reports** -- Combine with MCP scheduled tasks to get a daily portfolio summary at 9am
 
