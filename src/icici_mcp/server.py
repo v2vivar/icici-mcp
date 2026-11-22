@@ -18,7 +18,6 @@ mcp = FastMCP("icici")
 # Annotation presets
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
-DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
 
 AUDIT_LOG = Path.home() / ".trading-audit.log"
 
@@ -243,7 +242,6 @@ def get_option_chain(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool(annotations=WRITE)
 def place_order(
     stock_code: Annotated[str, "Stock symbol, e.g. RELIANCE, INFY, NIFTY"],
     exchange_code: Annotated[str, "Exchange: NSE for stocks, NFO for F&O"],
@@ -309,7 +307,6 @@ def place_order(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool(annotations=WRITE)
 def modify_order(
     order_id: Annotated[str, "Order ID to modify"],
     exchange_code: Annotated[str, "Exchange: NSE or NFO"],
@@ -343,7 +340,6 @@ def modify_order(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool(annotations=DESTRUCTIVE)
 def cancel_order(
     exchange_code: Annotated[str, "Exchange: NSE or NFO"],
     order_id: Annotated[str, "Order ID to cancel"],
@@ -361,7 +357,6 @@ def cancel_order(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool(annotations=WRITE)
 def square_off(
     exchange_code: Annotated[str, "Exchange: NSE or NFO"],
     stock_code: Annotated[str, "Stock symbol to square off"],

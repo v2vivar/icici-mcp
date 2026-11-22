@@ -1,14 +1,18 @@
 """Tests for the server module."""
 
+import asyncio
 import json
+
+import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
 from icici_mcp.server import mcp, place_order
 
 
 class TestToolRegistration:
-    """Verify all 14 tools are registered."""
+    """Verify the exposed tool set cannot place or change orders."""
 
-    EXPECTED_TOOLS = [
+    EXPECTED_TOOLS = (
         "icici_login",
         "get_holdings",
         "get_demat_holdings",
@@ -19,20 +23,20 @@ class TestToolRegistration:
         "get_quote",
         "get_historical_data",
         "get_option_chain",
-        "place_order",
-        "modify_order",
-        "cancel_order",
-        "square_off",
-    ]
+    )
 
     def test_all_tools_registered(self):
-        tool_names = [tool.name for tool in mcp._tool_manager.list_tools()]
-        for expected in self.EXPECTED_TOOLS:
-            assert expected in tool_names, f"Tool '{expected}' not registered"
+        tool_names = {tool.name for tool in mcp._tool_manager.list_tools()}
+        assert tool_names == set(self.EXPECTED_TOOLS)
 
-    def test_tool_count(self):
-        tools = mcp._tool_manager.list_tools()
-        assert len(tools) == 14
+    @pytest.mark.parametrize("name", ["place_order", "modify_order", "cancel_order", "square_off"])
+    def test_live_order_tools_cannot_be_called(self, name, monkeypatch):
+        def unexpected_breeze_call():
+            pytest.fail("An unregistered tool reached Breeze")
+
+        monkeypatch.setattr("icici_mcp.server._breeze", unexpected_breeze_call)
+        with pytest.raises(ToolError, match=f"Unknown tool: {name}"):
+            asyncio.run(mcp.call_tool(name, {}))
 
     def test_tools_have_descriptions(self):
         for tool in mcp._tool_manager.list_tools():

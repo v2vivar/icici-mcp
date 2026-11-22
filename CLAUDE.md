@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-icici-mcp is an MCP (Model Context Protocol) server for ICICI Direct Breeze Connect that enables trading Indian stocks through natural conversation with any MCP-compatible AI assistant.
+icici-mcp is an MCP (Model Context Protocol) server for ICICI Direct Breeze Connect that provides portfolio and market data through any MCP-compatible AI assistant.
 
 - **Author:** Amit Ranjan (aranjan)
 - **Repository:** https://github.com/aranjan/icici-mcp
@@ -32,7 +32,7 @@ icici-mcp is part of a multi-broker trading system:
 Claude Desktop
   ├── kite-mcp          → Zerodha portfolio + orders (auto TOTP)
   ├── zerodha-official   → Free quotes for any NSE stock (browser OAuth)
-  ├── icici-mcp         → ICICI Direct portfolio + orders (Playwright TOTP)
+  ├── icici-mcp         → ICICI Direct portfolio + order history (Playwright TOTP)
   ├── finance MCP       → Technical analysis (RSI, MACD, Bollinger, MA)
   └── Slack MCP         → Post to #kite-portfolio
 ```
@@ -51,7 +51,7 @@ Claude Desktop
   src/icici_mcp/
     __init__.py       # Version string
     auth.py           # Shared auth: load_credentials, automated_login, get_authenticated_breeze
-    server.py         # FastMCP server with 14 @mcp.tool() decorated tools
+    server.py         # FastMCP server with 10 @mcp.tool() decorated tools
     cli.py            # CLI entry points: login(), status()
   tests/
     __init__.py
@@ -76,11 +76,11 @@ Claude Desktop
 ## Key Files
 
 - **src/icici_mcp/auth.py** -- all authentication logic. `get_authenticated_breeze()` tries cached token -> manual session token -> auto-login via Playwright. `automated_login()` launches headless Chromium, fills credentials, submits TOTP, intercepts the redirect to capture the apisession token. Uses `concurrent.futures.ThreadPoolExecutor` to handle asyncio.run() when called from an existing event loop (co-work compatibility fix).
-- **src/icici_mcp/server.py** -- all 14 tools. `_breeze()` helper returns authenticated instance. Tools use `Annotated` type hints for parameter descriptions and `ToolAnnotations` for read-only/write/destructive hints.
+- **src/icici_mcp/server.py** -- all 10 exposed tools. `_breeze()` helper returns authenticated instance. Live-order functions are not registered as MCP tools.
 - **src/icici_mcp/cli.py** -- `login()` opens browser, prompts for apisession token, caches it. `status()` checks cached token.
 - **run.sh** -- wrapper script that `cd`s to project directory before launching the server. Required because breeze_connect SDK creates `logs/` directory in cwd on import, which fails in Claude Desktop's read-only launch directory.
 
-## 14 MCP Tools
+## 10 MCP Tools
 
 | Tool | Annotation | Description |
 |------|-----------|-------------|
@@ -94,10 +94,10 @@ Claude Desktop
 | get_quote | READ_ONLY | Live quotes (equity and F&O) |
 | get_historical_data | READ_ONLY | Historical OHLCV candles |
 | get_option_chain | READ_ONLY | Option chain quotes |
-| place_order | WRITE | Place buy/sell orders |
-| modify_order | WRITE | Modify pending orders |
-| cancel_order | DESTRUCTIVE | Cancel pending orders |
-| square_off | WRITE | Square off positions |
+
+Do not expose the live-order functions until server-side authorization,
+order-specific explicit approval, risk validation, audit logging, and a kill
+switch are implemented.
 
 ## ICICI Stock Code Mapping
 

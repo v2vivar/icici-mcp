@@ -11,16 +11,13 @@
   <a href="https://smithery.ai/servers/aranjan/icici-mcp"><img src="https://smithery.ai/badge/aranjan/icici-mcp" alt="Smithery"></a>
 </p>
 
-MCP server for [ICICI Direct](https://www.icicidirect.com/) -- trade Indian stocks through natural conversation with any [MCP-compatible](https://modelcontextprotocol.io/) AI assistant.
+MCP server for [ICICI Direct](https://www.icicidirect.com/) -- monitor Indian stocks and portfolios through any [MCP-compatible](https://modelcontextprotocol.io/) AI assistant.
 
 ## Why an MCP server instead of a Python library?
 
 Traditional Breeze Connect wrappers require you to write Python code to trade. With icici-mcp, you just talk:
 
 ```
-You:       "Buy 50 Reliance at market price"
-Assistant: checks quote, verifies funds, asks for confirmation, places order
-
 You:       "How's my portfolio doing?"
 Assistant: fetches holdings, calculates P&L, summarizes gainers and losers
 
@@ -30,7 +27,7 @@ Assistant: fetches option chain data with strikes, premiums, and OI
 
 No code. No scripts. No terminal. Just conversation.
 
-icici-mcp connects any MCP-compatible AI assistant directly to your ICICI Direct account with 14 trading tools, automated TOTP login, and auto-retry on expired tokens.
+icici-mcp connects any MCP-compatible AI assistant to your ICICI Direct account with portfolio and market-data tools, automated TOTP login, and auto-retry on expired tokens.
 
 ## How it works
 
@@ -38,11 +35,11 @@ icici-mcp connects any MCP-compatible AI assistant directly to your ICICI Direct
 You (natural language) --> AI Assistant --> icici-mcp (MCP server) --> ICICI Direct Breeze API
 ```
 
-Your AI assistant interprets your intent, maps stock names to symbols (e.g., "Infosys" to INFY), checks your funds, and executes trades -- all through the MCP protocol. The server handles authentication automatically, including daily token refresh via TOTP.
+Your AI assistant can retrieve portfolio and market data through the MCP protocol. The server handles authentication automatically, including daily token refresh via TOTP.
 
 ## Features
 
-14 tools for complete trading control:
+10 tools for authentication, portfolio monitoring, and market data:
 
 | Tool | Description |
 |------|-------------|
@@ -56,16 +53,19 @@ Your AI assistant interprets your intent, maps stock names to symbols (e.g., "In
 | `get_quote` | Live market quotes (equity and F&O) |
 | `get_historical_data` | Historical OHLCV candle data |
 | `get_option_chain` | Option chain quotes with strikes and premiums |
-| `place_order` | Place buy/sell orders (market, limit, stop-loss) |
-| `modify_order` | Modify pending orders |
-| `cancel_order` | Cancel pending orders |
-| `square_off` | Square off open positions |
+
+Live trading tools are not exposed through MCP. They must not be re-enabled
+until server-side authorization, order-specific explicit approval, risk
+validation, audit logging, and a kill switch are implemented. The login tool
+can still authenticate and update the local session-token cache. The existing
+Python order functions remain callable directly; this restriction applies to
+MCP exposure.
 
 **Key capabilities:**
 - Fully automated login -- TOTP generated on the fly, no manual intervention
 - Auto-retry on stale tokens -- re-authenticates transparently if a token expires mid-session
 - Option chain data for F&O analysis
-- Supports equity (cash), futures, options, margin, and BTST orders
+- Supports equity and F&O market data
 
 ## Compatible with
 
@@ -134,7 +134,7 @@ Add this to your MCP client configuration. The config location depends on your c
 }
 ```
 
-Restart your MCP client. You're ready to trade.
+Restart your MCP client. You're ready to monitor your account.
 
 ### 4. Try it out
 
@@ -142,9 +142,7 @@ Open a new chat and try:
 
 - "Show my portfolio holdings"
 - "What's Reliance trading at?"
-- "Buy 10 Infosys at market price"
 - "How much cash do I have available?"
-- "Cancel my last pending order"
 - "Show me NIFTY option chain for the nearest expiry"
 
 The AI assistant understands stock names in plain English -- no need to use trading symbols.
@@ -186,10 +184,8 @@ This caches the session token for the rest of the day. The MCP server will use t
 ## Use Cases
 
 - **Daily portfolio monitoring** -- "Give me a summary of my portfolio with top gainers and losers"
-- **Quick trades** -- "Buy 50 Reliance" / "Sell all my Yes Bank"
-- **F&O trading** -- "Show me BANKNIFTY option chain" / "Buy 1 lot NIFTY 25000 CE"
-- **Research + action** -- "What's the 52-week high of HDFC Bank? Should I add more at current levels?"
-- **Position management** -- "Square off all my margin positions"
+- **F&O research** -- "Show me BANKNIFTY option chain"
+- **Research** -- "What's the 52-week high of HDFC Bank?"
 - **Scheduled reports** -- Combine with MCP scheduled tasks to get a daily portfolio summary at 9am
 
 ## Roadmap
