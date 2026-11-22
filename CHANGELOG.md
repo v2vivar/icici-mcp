@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Disable MCP exposure of live-order tools pending trading safeguards.
+- Use manual ICICI login with an India-day token cache; do not auto-login with TOTP.
+- Constrain the MCP dependency to supported 1.x versions.
+
+### Added
+- Docker Compose deployment with a strictly authenticated mcpo proxy and shared token volume.
+- Instructions for Open WebUI and daily manual session renewal.
+- A report documenting the live-trading exposure finding.
+
 ## [0.1.0] - 2026-03-25
 
 ### Added

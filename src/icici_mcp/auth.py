@@ -5,8 +5,9 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -15,6 +16,7 @@ import pyotp
 from breeze_connect import BreezeConnect
 
 TOKEN_FILE = Path.home() / ".icici_direct_token.json"
+INDIA_TIME = timezone(timedelta(hours=5, minutes=30))
 
 
 def _setup_logger():
@@ -36,13 +38,11 @@ def load_credentials() -> dict:
     """Load credentials from environment variables.
 
     Returns a dict with keys: api_key, api_secret, user_id, password, totp_secret, session_token.
-    Raises SystemExit if required variables are missing.
+    API key and secret are required. Raises SystemExit if either is missing.
     """
     required = {
         "ICICI_API_KEY": "api_key",
         "ICICI_API_SECRET": "api_secret",
-        "ICICI_USER_ID": "user_id",
-        "ICICI_PASSWORD": "password",
     }
     creds = {}
     missing = []
@@ -64,6 +64,8 @@ def load_credentials() -> dict:
 
     creds["totp_secret"] = os.environ.get("ICICI_TOTP_SECRET")
     creds["session_token"] = os.environ.get("ICICI_SESSION_TOKEN")
+    creds["user_id"] = os.environ.get("ICICI_USER_ID", "")
+    creds["password"] = os.environ.get("ICICI_PASSWORD", "")
     logger.debug("Credentials loaded for user_id=%s", creds["user_id"])
     return creds
 
@@ -72,7 +74,7 @@ def get_cached_token() -> str | None:
     """Return today's cached session token, or None if expired/missing."""
     if TOKEN_FILE.exists():
         data = json.loads(TOKEN_FILE.read_text())
-        if data.get("date") == datetime.now().strftime("%Y-%m-%d"):
+        if data.get("date") == datetime.now(INDIA_TIME).strftime("%Y-%m-%d"):
             logger.debug("Using cached session token from %s", data["date"])
             return data["session_token"]
         logger.debug("Cached token expired (date=%s)", data.get("date"))
@@ -94,15 +96,20 @@ def open_login_page(api_key: str) -> str:
 
 def save_session_token(session_token: str) -> None:
     """Cache a session token for the rest of the day."""
-    TOKEN_FILE.write_text(
-        json.dumps(
-            {
-                "session_token": session_token,
-                "date": datetime.now().strftime("%Y-%m-%d"),
-            }
-        )
-    )
-    os.chmod(TOKEN_FILE, 0o600)
+    fd, temporary_name = tempfile.mkstemp(dir=TOKEN_FILE.parent, prefix=".icici-token-")
+    try:
+        with os.fdopen(fd, "w") as token_file:
+            json.dump(
+                {
+                    "session_token": session_token,
+                    "date": datetime.now(INDIA_TIME).strftime("%Y-%m-%d"),
+                },
+                token_file,
+            )
+        os.chmod(temporary_name, 0o600)
+        os.replace(temporary_name, TOKEN_FILE)
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
     logger.info("Session token cached to %s", TOKEN_FILE)
 
 
@@ -265,33 +272,31 @@ def automated_login(
     return session_token
 
 
-def get_authenticated_breeze(creds: dict) -> BreezeConnect:
+def get_authenticated_breeze(creds: dict, *, use_cached_token: bool = True) -> BreezeConnect:
     """Return an authenticated BreezeConnect instance.
 
     Auth priority:
     1. Today's cached session token
     2. ICICI_SESSION_TOKEN env var (manual override)
-    3. Auto-login with TOTP via headless browser (if ICICI_TOTP_SECRET set)
-    4. Error with instructions
+    3. Error with instructions for manual login
     """
     logger.info("Authenticating with ICICI Direct for user_id=%s", creds["user_id"])
     breeze = BreezeConnect(api_key=creds["api_key"])
 
     # Try cached token first — validate it actually works
-    cached = get_cached_token()
+    cached = get_cached_token() if use_cached_token else None
     if cached:
         try:
             breeze.generate_session(
                 api_secret=creds["api_secret"], session_token=cached
             )
-            # Validate with a lightweight call
-            breeze.get_customer_details()
+            # Breeze validates the API session during generate_session.
             logger.info("Authenticated using cached token")
             return breeze
         except Exception as e:
             # Cached token is invalid/expired — fall through to other methods
             logger.warning("Cached token invalid: %s", e)
-            print("Cached ICICI token expired, attempting re-login...", file=sys.stderr)
+            print("Cached ICICI token invalid, checking manual session token...", file=sys.stderr)
             breeze = BreezeConnect(api_key=creds["api_key"])
 
     # Try manual session token override
@@ -301,37 +306,16 @@ def get_authenticated_breeze(creds: dict) -> BreezeConnect:
                 api_secret=creds["api_secret"],
                 session_token=creds["session_token"],
             )
-            breeze.get_customer_details()
-            save_session_token(creds["session_token"])
-            logger.info("Authenticated using manual session token")
-            return breeze
         except Exception as e:
-            logger.warning("Manual session token invalid: %s", e)
-            print("Manual session token expired, attempting auto-login...", file=sys.stderr)
-            breeze = BreezeConnect(api_key=creds["api_key"])
-
-    # Try auto-login with TOTP via headless browser
-    if creds["totp_secret"]:
-        logger.info("Attempting auto-login via Playwright with TOTP")
-        session_token = automated_login(
-            creds["api_key"],
-            creds["api_secret"],
-            creds["user_id"],
-            creds["password"],
-            creds["totp_secret"],
-        )
-        breeze.generate_session(
-            api_secret=creds["api_secret"], session_token=session_token
-        )
+            logger.warning("Manual session token validation failed: %s", e)
+            raise RuntimeError("Manual ICICI session token could not be validated.") from e
+        save_session_token(creds["session_token"])
+        logger.info("Authenticated using manual session token")
         return breeze
 
     # No valid token available
-    logger.error("No valid session token and no TOTP secret for auto-login")
-    login_url = get_login_url(creds["api_key"])
+    logger.error("No valid session token available")
     raise RuntimeError(
-        "No valid session token. To fix this, either:\n"
-        "1. Set ICICI_TOTP_SECRET for fully automated login\n"
-        f"2. Log in manually at: {login_url}\n"
-        "   Then set ICICI_SESSION_TOKEN=<apisession from redirect URL>\n"
-        "3. Run: icici-mcp-login\n"
+        "No valid session token. Run icici-mcp-login in the same environment, "
+        "or set ICICI_SESSION_TOKEN to a manually obtained API session token."
     )

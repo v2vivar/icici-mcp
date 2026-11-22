@@ -19,11 +19,18 @@ class TestLogin:
             "ICICI_PASSWORD": "pass",
         }
         with mock.patch.dict(os.environ, env, clear=True):
-            # Mock input() to return empty string and webbrowser.open to do nothing
-            with mock.patch("builtins.input", return_value=""):
-                with mock.patch("icici_mcp.auth.webbrowser.open"):
-                    with pytest.raises(SystemExit):
-                        login()
+            with mock.patch("icici_mcp.cli.getpass", return_value=""):
+                with pytest.raises(SystemExit):
+                    login()
+
+    def test_manual_login_validates_entered_token_not_cached_token(self):
+        env = {"ICICI_API_KEY": "key", "ICICI_API_SECRET": "secret"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch("icici_mcp.cli.getpass", return_value="new-token"):
+                with mock.patch("icici_mcp.cli.get_authenticated_breeze") as authenticate:
+                    login()
+        assert authenticate.call_args.kwargs == {"use_cached_token": False}
+        assert authenticate.call_args.args[0]["session_token"] == "new-token"
 
 
 class TestStatus:

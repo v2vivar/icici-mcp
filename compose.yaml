@@ -1,0 +1,22 @@
+services:
+  icici:
+    build: .
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - icici-session:/home/icici
+    networks:
+      default:
+      private:
+        aliases:
+          - icici-mcp
+    restart: unless-stopped
+
+volumes:
+  icici-session:
+
+networks:
+  private:
+    name: docker-net-private
+    external: true
